@@ -264,7 +264,7 @@ def main():
     )
 
     # Hardcoded folder path
-    folder_path = r"C:\Users\vighn\OneDrive\Desktop\Python\project-samarth\data"
+    folder_path = r"data"
     st.sidebar.info(f"Path: `{folder_path}`")
     
     # Define required filenames
