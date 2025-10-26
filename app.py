@@ -364,3 +364,6 @@ def main():
             
             # Use st.rerun() to update the code display expender
             st.rerun()
+            
+if __name__ == "__main__":
+    main()
