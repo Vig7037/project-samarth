@@ -103,6 +103,13 @@ def preprocess_data(folder_path, rf_filename, lac_filename):
     )
     df_unified = df_unified[df_unified['State'] != 'Total'].reset_index(drop=True)
 
+    # CRITICAL: Filter unified data to only cover the intersecting time period of the two datasets
+    # Lac data is 2007-2011 (financial years 2007-08 to 2011-12)
+    min_year = df_unified['Year'].min()
+    max_year = df_unified['Year'].max()
+    
+    st.session_state['data_range'] = f"{min_year}-{max_year}"
+    
     return df_unified
 
 # --- 3. LLM AGENT LOGIC (Phase 2 Solution) ---
@@ -117,6 +124,7 @@ def answer_question(question, df_unified):
     try:
         api_key_to_use = st.secrets["GEMINI_API_KEY"]
     except KeyError:
+        # This fallback is for local testing if the key is not in secrets.toml
         st.error("Deployment Error: GEMINI_API_KEY not found in secrets.toml.")
         return "System configuration error: Please ensure 'GEMINI_API_KEY' is set in your Streamlit secrets file."
 
@@ -126,6 +134,7 @@ def answer_question(question, df_unified):
     You are Project Samarth, an intelligent cross-domain data analysis and Q&A system for policy advisors.
     Your role is to analyze a unified, cleaned dataset on Indian Agriculture and Climate.
     The data is available in a Pandas DataFrame called 'df_unified'.
+    The current available time range is {st.session_state.get('data_range', '2007-2011')}.
     The DataFrame contains the following critical columns:
     - 'State': The administrative state (Normalized Geographic Unit).
     - 'Year': The calendar year (Normalized Temporal Unit, e.g., 2008).
@@ -134,14 +143,14 @@ def answer_question(question, df_unified):
 
     When the user asks a question, your process is:
     1. **Tool Use (Code Generation):** If the question requires data analysis (comparison, aggregation, statistical analysis, or filtering), you MUST generate a complete Python code snippet inside a ```python block.
-    2. **Code Constraints:** The code MUST ONLY use the 'df_unified' DataFrame. Use standard Pandas operations. Print the final calculated result, a concise summary DataFrame, or a clear textual finding to stdout. Print output using print() statements or by calling .to_markdown() on a resulting dataframe.
+    2. **Code Constraints (CRITICAL FIX):** The code MUST ONLY use the 'df_unified' DataFrame. Use standard Pandas operations. **DO NOT use .to_markdown() as this requires external libraries.** Print the final calculated result, a concise summary DataFrame, or a clear textual finding using **.to_string()** or **plain print()** statements to stdout.
     3. **Tool Use (Final Answer):** If no code is needed, or once the code output is provided, you MUST formulate a clear, policy-relevant, and cited natural language response.
-    4. **Citations (Traceability):** For every data-backed claim, you MUST state the data was derived from **IMD Rainfall Data** and/or **Lac Production Data**.
+    4. **Citations (Traceability):** For every data-backed claim, you MUST state the data was derived from **IMD Rainfall Data** and/or **Lac Production Data**. Also, **if the question asks for data outside the {st.session_state.get('data_range', '2007-2011')} range, you must state that the required data is not available and answer based only on the available range if possible.**
 
     Example Code Generation for Reference:
-    # Example: Correlation
+    # Example: Correlation (Using .to_string() instead of .to_markdown())
     corr = df_unified.groupby('State')[['Rainfall_Monsoon_mm', 'Lac_Production_Tons']].corr().unstack().iloc[:,1]['Rainfall_Monsoon_mm']
-    print(corr.sort_values(ascending=False).to_markdown(index=True))
+    print(corr.sort_values(ascending=False).to_string(header=True))
 
     Begin by strictly following this process for the user's question.
     """
@@ -191,6 +200,7 @@ def answer_question(question, df_unified):
             
             exec_globals = {'df_unified': df_unified, 'pd': pd}
             
+            # Capture output
             buffer = io.StringIO()
             exec(code_block, exec_globals, {'print': lambda *args, **kwargs: buffer.write(' '.join(map(str, args)) + '\n')})
             code_output = buffer.getvalue().strip()
@@ -214,7 +224,7 @@ def answer_question(question, df_unified):
     {code_output}
     --- OUTPUT END ---
     
-    Now, acting as Project Samarth, provide the final, synthesized, and policy-relevant answer to the user. You MUST explicitly state the sources (IMD Rainfall Data and/or Lac Production Data) used for the claim based on the execution result. If the execution resulted in an error, apologize and suggest a rephrase.
+    Now, acting as Project Samarth, provide the final, synthesized, and policy-relevant answer to the user. You MUST explicitly state the sources (IMD Rainfall Data and/or Lac Production Data) used for the claim based on the execution result. If the execution resulted in an error, apologize and suggest a rephrase. Ensure the output is formatted as a single, coherent response.
     """
 
     retry_delay = 1
@@ -264,7 +274,7 @@ def main():
     )
 
     # Hardcoded folder path
-    folder_path = r"data"
+    folder_path = r"C:\Users\vighn\OneDrive\Desktop\Python\project-samarth\data"
     st.sidebar.info(f"Path: `{folder_path}`")
     
     # Define required filenames
@@ -282,11 +292,11 @@ def main():
                 st.session_state['df_unified'] = df_unified
             
             st.sidebar.success("✅ Datasets Integrated Successfully!")
-            st.sidebar.write(f"**Unified Records:** {len(df_unified)} rows available for analysis (2007-2011).")
+            st.sidebar.write(f"**Unified Records:** {len(df_unified)} rows available for analysis (Years: {st.session_state.get('data_range', 'N/A')}).")
             
             # Initialize chat messages for the new context
             st.session_state['messages'] = [
-                {"role": "assistant", "content": f"Data loaded! We have {len(df_unified)} normalized records (2007-2011). Ask me a question about the correlation between monsoon rainfall and lac production."}
+                {"role": "assistant", "content": f"Data loaded! We have {len(df_unified)} normalized records (Years: {st.session_state.get('data_range', 'N/A')}). Ask me a question about the correlation between monsoon rainfall and lac production."}
             ]
             # Use st.rerun() to update the chat box immediately after loading the data
             st.rerun()
@@ -353,7 +363,4 @@ def main():
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
             
             # Use st.rerun() to update the code display expender
-            st.rerun() 
-
-if __name__ == "__main__":
-    main()
+            st.rerun()
